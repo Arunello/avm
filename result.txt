@@ -1,0 +1,22 @@
+Reference word: "hello"
+  match="Hello"  position=1   length=5  type=full     difference=0,00%
+  match="hello"  position=13  length=5  type=full     difference=0,00%
+  match="hallo"  position=26  length=5  type=partial  difference=20,00%
+  match="hellp"  position=32  length=5  type=partial  difference=20,00%
+  match="hell"   position=38  length=4  type=partial  difference=20,00%
+
+Reference word: "world"
+  match="world"   position=7   length=5  type=full     difference=0,00%
+  match="worlds"  position=19  length=6  type=partial  difference=16,67%
+
+Reference word: "cat"
+  match="cat"  position=43  length=3  type=full  difference=0,00%
+  match="CAT"  position=47  length=3  type=full  difference=0,00%
+
+Reference word: "привет"
+  match="привет"  position=51  length=6  type=full     difference=0,00%
+  match="Привет"  position=58  length=6  type=full     difference=0,00%
+  match="привт"   position=65  length=5  type=partial  difference=16,67%
+
+Reference word: "dog"
+  (no matches)
