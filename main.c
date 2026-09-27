@@ -4,25 +4,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>   /* strcasecmp */
+#include <strings.h>
 #include <errno.h>
 #include <locale.h>
-#include <langinfo.h>  /* nl_langinfo, CODESET */
+#include <langinfo.h>
 #include <wchar.h>
 #include <wctype.h>
 
-/* Partial-match threshold: difference = DL distance / max(len1, len2). */
 static const double PARTIAL_THRESHOLD = 0.20;
 
-/* ------------------------------------------------------------------- */
-/* Data structures                                                      */
-/* ------------------------------------------------------------------- */
-
 struct Word {
-    wchar_t *original;  /* original casing, for output                */
-    wchar_t *lowered;   /* lowercased copy, for comparison             */
-    size_t   length;    /* length in code points                      */
-    size_t   position;  /* 1-based code-point position in source file */
+    wchar_t *original;
+    wchar_t *lowered;
+    size_t   length;
+    size_t   position;
 };
 
 struct WordList {
@@ -33,13 +28,9 @@ struct WordList {
 
 struct Match {
     const struct Word *target_word;
-    int                is_full;     /* 1 = full match, 0 = partial */
-    double             difference;  /* fraction in [0, PARTIAL_THRESHOLD] */
+    int                is_full;
+    double             difference;
 };
-
-/* ------------------------------------------------------------------- */
-/* Prototypes                                                           */
-/* ------------------------------------------------------------------- */
 
 static int    read_file_bytes(const char *path, unsigned char **out_buf, size_t *out_len);
 static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t **out_cps);
@@ -67,12 +58,6 @@ static int    write_results(FILE *out, const struct WordList *ref,
 
 int main(void);
 
-/* ------------------------------------------------------------------- */
-/* File reading                                                         */
-/* ------------------------------------------------------------------- */
-
-/* Reads the whole contents of `path` into a freshly malloc'd buffer.
- * Works for files of any size without assuming they are seekable. */
 static int read_file_bytes(const char *path, unsigned char **out_buf, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
@@ -112,7 +97,7 @@ static int read_file_bytes(const char *path, unsigned char **out_buf, size_t *ou
                 fclose(f);
                 return -1;
             }
-            break; /* EOF reached */
+            break;
         }
     }
 
@@ -127,26 +112,6 @@ static int read_file_bytes(const char *path, unsigned char **out_buf, size_t *ou
     return 0;
 }
 
-/* ------------------------------------------------------------------- */
-/* UTF-8 decoding / encoding                                            */
-/* ------------------------------------------------------------------- */
-
-/* Decodes a raw UTF-8 byte buffer into an array of Unicode code points
- * (stored as wchar_t, which is a 32-bit type on both FreeBSD and Linux).
- * Any malformed byte (invalid lead byte, truncated sequence, bad
- * continuation byte, overlong encoding, surrogate half, or code point
- * above U+10FFFF) is replaced with a single U+FFFD REPLACEMENT CHARACTER
- * and decoding resumes at the very next byte -- this routine never fails
- * or aborts on malformed input, it only substitutes/resyncs.
- *
- * This is a self-contained decoder (rather than mbrtowc()) so that
- * decoding is correct regardless of which locales are installed/active
- * on the machine running the program.
- *
- * On success returns the number of decoded code points and sets
- * *out_cps to a malloc'd array (which may be NULL when the count is 0).
- * Returns (size_t)-1 on allocation failure.
- */
 static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t **out_cps) {
     wchar_t *cps = NULL;
     size_t cap = 0, n = 0;
@@ -176,7 +141,7 @@ static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t *
 
         if (valid && seqlen > 1) {
             if (i + seqlen > len) {
-                valid = 0; /* truncated at end of file */
+                valid = 0;
             } else {
                 size_t k;
                 for (k = 1; k < seqlen; k++) {
@@ -188,8 +153,6 @@ static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t *
         }
 
         if (valid) {
-            /* Reject overlong encodings, surrogate halves, and values
-             * outside the valid Unicode range. */
             if (seqlen == 2 && cp < 0x80) valid = 0;
             else if (seqlen == 3 && cp < 0x800) valid = 0;
             else if (seqlen == 4 && cp < 0x10000) valid = 0;
@@ -199,7 +162,7 @@ static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t *
 
         if (!valid) {
             cp = 0xFFFDUL;
-            seqlen = 1; /* consume exactly one byte, then resynchronize */
+            seqlen = 1;
         }
 
         if (n == cap) {
@@ -220,9 +183,6 @@ static size_t utf8_decode_buffer(const unsigned char *buf, size_t len, wchar_t *
     return n;
 }
 
-/* Encodes `len` code points from `s` to UTF-8 bytes and writes them to
- * `out`. Symmetric, locale-independent counterpart of utf8_decode_buffer().
- * Returns 0 on success, -1 on a write error. */
 static int write_utf8(FILE *out, const wchar_t *s, size_t len) {
     size_t i;
     for (i = 0; i < len; i++) {
@@ -253,10 +213,6 @@ static int write_utf8(FILE *out, const wchar_t *s, size_t len) {
     }
     return 0;
 }
-
-/* ------------------------------------------------------------------- */
-/* Word-list construction                                               */
-/* ------------------------------------------------------------------- */
 
 static int word_list_push(struct WordList *list, const wchar_t *orig_start,
                            size_t len, size_t position) {
@@ -290,12 +246,6 @@ static int word_list_push(struct WordList *list, const wchar_t *orig_start,
     return 0;
 }
 
-/* Splits a sequence of decoded code points into whitespace-separated
- * words, recording each word's original text, lowercased text, length,
- * and 1-based starting position (counted in code points from the very
- * start of the sequence, exactly as required -- every code point,
- * including whitespace and newlines, advances the position count since
- * `cps` already contains every decoded code point of the file in order). */
 static int build_word_list_from_codepoints(const wchar_t *cps, size_t n_cps,
                                             struct WordList *out) {
     out->items = NULL;
@@ -310,7 +260,7 @@ static int build_word_list_from_codepoints(const wchar_t *cps, size_t n_cps,
         size_t start = i;
         while (i < n_cps && !iswspace((wint_t)cps[i])) i++;
         size_t wlen = i - start;
-        size_t position = start + 1; /* 1-based */
+        size_t position = start + 1;
 
         if (word_list_push(out, &cps[start], wlen, position) != 0) {
             return -1;
@@ -323,7 +273,7 @@ static int read_utf8_words(const char *path, struct WordList *out) {
     unsigned char *buf = NULL;
     size_t len = 0;
     if (read_file_bytes(path, &buf, &len) != 0) {
-        return -1; /* message already printed */
+        return -1;
     }
 
     wchar_t *cps = NULL;
@@ -356,14 +306,6 @@ static void free_word_list(struct WordList *list) {
     list->capacity = 0;
 }
 
-/* ------------------------------------------------------------------- */
-/* Locale                                                               */
-/* ------------------------------------------------------------------- */
-
-/* Sets the locale from the environment and warns (without ever aborting)
- * if it does not appear to be UTF-8. File decoding/encoding is done by
- * hand elsewhere and is unaffected either way; only towlower()'s
- * handling of non-ASCII letters depends on this. */
 static void check_locale_and_warn(void) {
     const char *loc = setlocale(LC_ALL, "");
     if (loc == NULL) {
@@ -393,10 +335,6 @@ static void check_locale_and_warn(void) {
     }
 }
 
-/* ------------------------------------------------------------------- */
-/* Word comparison                                                      */
-/* ------------------------------------------------------------------- */
-
 static int words_equal(const wchar_t *a, const wchar_t *b, size_t len) {
     size_t i;
     for (i = 0; i < len; i++) {
@@ -405,23 +343,6 @@ static int words_equal(const wchar_t *a, const wchar_t *b, size_t len) {
     return 1;
 }
 
-/*
- * True (unrestricted) Damerau-Levenshtein distance between two code-point
- * arrays, computed with the classic Lowrance-Wagner O(n*m) dynamic
- * programming algorithm. This counts an adjacent transposition as a
- * single edit even when the transposed characters recur later in the
- * strings, unlike the simpler "optimal string alignment" (OSA) distance,
- * which is NOT what is implemented here.
- *
- * `da` records, for each distinct character seen so far in `a`, the most
- * recent row at which it occurred (0 = not yet seen) -- exactly the "da"
- * array of the reference algorithm. A small linear-scan association list
- * is used instead of an array indexed directly by code point (which could
- * demand a huge allocation for a single high-value Unicode character);
- * this is efficient enough for the short words this program deals with.
- *
- * Returns (size_t)-1 if memory allocation fails.
- */
 static size_t damerau_levenshtein(const wchar_t *a, size_t la,
                                    const wchar_t *b, size_t lb) {
     if (la == 0) return lb;
@@ -436,7 +357,6 @@ static size_t damerau_levenshtein(const wchar_t *a, size_t la,
     size_t *d = malloc(rows * cols * sizeof(size_t));
     if (d == NULL) return (size_t)-1;
 
-    /* d[] holds logical indices -1..n by -1..m, shifted by +1 for storage. */
 #define D(i, j) d[(size_t)((i) + 1) * cols + (size_t)((j) + 1)]
 
     D(-1, -1) = (size_t)maxdist;
@@ -522,10 +442,6 @@ static size_t damerau_levenshtein(const wchar_t *a, size_t la,
     return result;
 }
 
-/* ------------------------------------------------------------------- */
-/* Matching and output                                                  */
-/* ------------------------------------------------------------------- */
-
 static int write_spaces(FILE *out, size_t n) {
     size_t i;
     for (i = 0; i < n; i++) {
@@ -534,10 +450,6 @@ static int write_spaces(FILE *out, size_t n) {
     return 0;
 }
 
-/* Scans every word of `target` for full/partial matches against `rw` and
- * appends them, in ascending target-position order (which is simply the
- * order `target` was built in), to a freshly allocated array.
- * Returns 0 on success (with *out_count possibly 0) or -1 on OOM. */
 static int collect_matches(const struct Word *rw, const struct WordList *target,
                             struct Match **out_matches, size_t *out_count) {
     struct Match *matches = NULL;
@@ -547,7 +459,7 @@ static int collect_matches(const struct Word *rw, const struct WordList *target,
     for (t = 0; t < target->count; t++) {
         const struct Word *tw = &target->items[t];
         size_t maxlen = (rw->length > tw->length) ? rw->length : tw->length;
-        if (maxlen == 0) continue; /* defensive; words are never empty */
+        if (maxlen == 0) continue;
 
         int is_full = (rw->length == tw->length) &&
                       words_equal(rw->lowered, tw->lowered, rw->length);
@@ -557,9 +469,7 @@ static int collect_matches(const struct Word *rw, const struct WordList *target,
             size_t lendiff = (rw->length > tw->length)
                             ? (rw->length - tw->length)
                             : (tw->length - rw->length);
-            /* The edit distance can never be smaller than the difference
-             * in length, so the expensive DP can be skipped whenever that
-             * alone already exceeds the threshold. */
+
             if ((double)lendiff / (double)maxlen > PARTIAL_THRESHOLD) {
                 continue;
             }
@@ -593,9 +503,6 @@ static int collect_matches(const struct Word *rw, const struct WordList *target,
     return 0;
 }
 
-/* Writes one "Reference word: ..." block, with its match lines (or the
- * "(no matches)" line) aligned into columns. Column widths are computed
- * per-block as (the widest field text among this block's matches) + 2. */
 static int print_block(FILE *out, const struct Word *rw,
                         const struct Match *matches, size_t mcount) {
     if (fputs("Reference word: \"", out) == EOF) return -1;
@@ -620,7 +527,7 @@ static int print_block(FILE *out, const struct Word *rw,
     size_t i;
     for (i = 0; i < mcount; i++) {
         const struct Word *tw = matches[i].target_word;
-        size_t match_w = 8 + tw->length; /* "match=\"" + word + "\"" */
+        size_t match_w = 8 + tw->length;
         if (match_w > w_match) w_match = match_w;
 
         int n = snprintf(pos_s[i], sizeof pos_s[i], "position=%zu", tw->position);
@@ -705,10 +612,6 @@ static int write_results(FILE *out, const struct WordList *ref,
     }
     return 0;
 }
-
-/* ------------------------------------------------------------------- */
-/* main                                                                  */
-/* ------------------------------------------------------------------- */
 
 int main(void) {
     check_locale_and_warn();
