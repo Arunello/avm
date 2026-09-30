@@ -5,10 +5,8 @@
 
 #define MAX_DIFFERENCE 0.20
 
-/* Максимальная длина одной строки в check.txt */
 #define MAX_LINE 4096
 
-/* Одно слово, найденное в checked.txt */
 struct Word {
     long byte_start;
     int byte_len;
@@ -39,8 +37,8 @@ int utf8_next(const unsigned char *s, int *cp) {
 
 int to_lower_cp(int cp) {
     if (cp >= 'A' && cp <= 'Z') return cp + 32;
-    if (cp == 0x0401) return 0x0451;                     // Ё -> ё
-    if (cp >= 0x0410 && cp <= 0x042F) return cp + 0x20;  // А-Я -> а-я
+    if (cp == 0x0401) return 0x0451;                     // Ё - ё
+    if (cp >= 0x0410 && cp <= 0x042F) return cp + 0x20;  // А-Я - а-я
     return cp;
 }
 
@@ -96,8 +94,6 @@ double calculate_difference(int distance, int len1, int len2) {
     return (double)distance / (double)maxlen;
 }
 
-/* ------------- Чтение checked.txt и разбиение на слова ------------- */
-
 unsigned char *read_whole_file(const char *filename, long *out_size) {
     FILE *f = fopen(filename, "rb");
     if (!f) return NULL;
@@ -106,8 +102,6 @@ unsigned char *read_whole_file(const char *filename, long *out_size) {
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    /* +4 байта запаса, чтобы utf8_next не вышел за пределы буфера,
-     * если последний символ файла окажется повреждённым */
     unsigned char *buf = malloc((size_t)size + 4);
     if (!buf) { fclose(f); return NULL; }
 
@@ -123,15 +117,10 @@ int is_separator(int cp) {
     return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r';
 }
 
-/* Разбивает буфер checked.txt на слова. Разделителем является
- * пробел, символ табуляции и символы конца строки \n, \r.
- * Массив найденных слов возвращается через out_words/out_count и
- * при необходимости растёт с помощью realloc. */
 void tokenize(const unsigned char *buf, long len, struct Word **out_words, int *out_count) {
     int capacity = 64;
     int count = 0;
     struct Word *words = malloc((size_t)capacity * sizeof(struct Word));
-    if (!words) { fprintf(stderr, "malloc failed\n"); exit(1); }
 
     long byte_pos = 0;
     long char_pos = 1;
@@ -146,7 +135,6 @@ void tokenize(const unsigned char *buf, long len, struct Word **out_words, int *
             continue;
         }
 
-        /* начало нового слова */
         long word_byte_start = byte_pos;
         long word_char_pos = char_pos;
         int word_char_len = 0;
@@ -163,7 +151,6 @@ void tokenize(const unsigned char *buf, long len, struct Word **out_words, int *
         if (count == capacity) {
             capacity *= 2;
             struct Word *tmp = realloc(words, (size_t)capacity * sizeof(struct Word));
-            if (!tmp) { fprintf(stderr, "realloc failed\n"); free(words); exit(1); }
             words = tmp;
         }
 
@@ -178,7 +165,6 @@ void tokenize(const unsigned char *buf, long len, struct Word **out_words, int *
     *out_count = count;
 }
 
-/* ------------- Форматирование разницы вида "16,67%" ------------- */
 
 void format_percent(double diff, char *out, size_t out_size) {
     snprintf(out, out_size, "%.2f%%", diff * 100.0);
@@ -187,50 +173,31 @@ void format_percent(double diff, char *out, size_t out_size) {
     }
 }
 
-/* -------------------------------- main -------------------------------- */
-
 int main() {
     long checked_len;
     unsigned char *checked_buf = read_whole_file("checked.txt", &checked_len);
-    if (!checked_buf) {
-        fprintf(stderr, "Не удалось открыть checked.txt\n");
-        return 1;
-    }
 
     struct Word *words;
     int word_count;
     tokenize(checked_buf, checked_len, &words, &word_count);
 
     FILE *fcheck = fopen("check.txt", "r");
-    if (!fcheck) {
-        fprintf(stderr, "Не удалось открыть check.txt\n");
-        free(checked_buf);
-        free(words);
-        return 1;
-    }
 
     FILE *fresult = fopen("result.txt", "w");
-    if (!fresult) {
-        fprintf(stderr, "Не удалось создать result.txt\n");
-        fclose(fcheck);
-        free(checked_buf);
-        free(words);
-        return 1;
-    }
 
     char line[MAX_LINE];
     while (fgets(line, sizeof(line), fcheck)) {
-        /* убираем \n и \r в конце строки */
+
         size_t len = strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
             line[--len] = '\0';
         }
-        if (len == 0) continue; /* пустые строки игнорируем */
+        if (len == 0) continue;
 
         fprintf(fresult, "Reference word: \"%s\"\n", line);
 
         int *ref_cp = malloc(len * sizeof(int));
-        if (!ref_cp) { fprintf(stderr, "malloc failed\n"); return 1; }
+
         int ref_len = decode_lower_word((unsigned char *)line, (int)len, ref_cp);
 
         int found = 0;
@@ -238,7 +205,7 @@ int main() {
             struct Word w = words[i];
 
             int *cand_cp = malloc((size_t)w.byte_len * sizeof(int));
-            if (!cand_cp) { fprintf(stderr, "malloc failed\n"); return 1; }
+
             int cand_len = decode_lower_word(checked_buf + w.byte_start, w.byte_len, cand_cp);
 
             int dist = damerau_levenshtein(ref_cp, ref_len, cand_cp, cand_len);
